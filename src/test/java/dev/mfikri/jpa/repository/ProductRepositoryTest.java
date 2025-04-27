@@ -2,16 +2,17 @@ package dev.mfikri.jpa.repository;
 
 import dev.mfikri.jpa.entity.Category;
 import dev.mfikri.jpa.entity.Product;
+import dev.mfikri.jpa.model.ProductPrice;
+import dev.mfikri.jpa.model.SimpleProduct;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.*;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.support.TransactionOperations;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -173,5 +174,94 @@ class ProductRepositoryTest {
         assertEquals(0, products.getNumber());
         assertEquals(2, products.getTotalPages());
         assertEquals(2, products.getTotalElements());
+    }
+
+    @Test
+    void modifying() {
+        transactionOperations.executeWithoutResult(transactionStatus -> {
+            int total = productRepository.deleteProductUsingName("salah");
+            assertEquals(0, total);
+
+            total = productRepository.updateProductPriceToZero(1L);
+            assertEquals(1, total);
+
+            Product product = productRepository.findById(1L).orElse(null);
+            assertNotNull(product);
+            assertEquals(0, product.getPrice());
+        });
+    }
+
+    @Test
+    void stream() {
+        transactionOperations.executeWithoutResult(transactionStatus -> {
+            Category category = categoryRepository.findById(1L).orElse(null);
+            assertNotNull(category);
+
+            Stream<Product> stream = productRepository.streamAllByCategory(category);
+            stream.forEach(product -> System.out.println(product.getId() + " : " + product.getName()));
+        });
+    }
+
+    @Test
+    void slice() {
+        Pageable firstPage = PageRequest.of(0, 1);
+        Category category = categoryRepository.findById(1L).orElse(null);
+        assertNotNull(category);
+        Slice<Product> slice = productRepository.findAllByCategory(category, firstPage);
+
+        while (slice.hasNext()){
+            slice = productRepository.findAllByCategory(category, slice.nextPageable());
+            //tampilkan kontent product
+        }
+    }
+
+    @Test
+    void lock1() {
+        transactionOperations.executeWithoutResult(transactionStatus -> {
+            try {
+                Product product = productRepository.findFirstByIdEquals(1L).orElse(null);
+                assertNotNull(product);
+                product.setPrice(30_000_000L);
+                Thread.sleep(20_000L);
+                productRepository.save(product);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+    @Test
+    void lock2() {
+        transactionOperations.executeWithoutResult(transactionStatus -> {
+            Product product = productRepository.findFirstByIdEquals(1L).orElse(null);
+            assertNotNull(product);
+            product.setPrice(10_000_000L);
+            productRepository.save(product);
+        });
+    }
+
+    @Test
+    void specification() {
+        Specification<Product> specification = (root, criteriaQuery, criteriaBuilder) -> {
+            return criteriaQuery.where(
+                    criteriaBuilder.or(
+                            criteriaBuilder.equal(root.get("name"), "Ultramilk 3L Vanilla"),
+                            criteriaBuilder.equal(root.get("name"), "Ultramilk 3L Strawberry")
+                    )
+            ).getRestriction();
+        };
+
+        List<Product> products = productRepository.findAll(specification);
+
+        assertEquals(2, products.size());
+    }
+
+    @Test
+    void projection() {
+        List<SimpleProduct> simpleProducts = productRepository.findAllByNameLike("%Ultramilk%", SimpleProduct.class);
+        assertEquals(2, simpleProducts.size());
+
+        List<ProductPrice> productPrices = productRepository.findAllByNameLike("Ultramilk%", ProductPrice.class);
+        assertEquals(2, productPrices.size());
     }
 }
